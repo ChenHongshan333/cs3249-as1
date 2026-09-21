@@ -1,6 +1,7 @@
 import {
   type CSSProperties,
   type FormEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type RefObject,
@@ -17,6 +18,8 @@ import paperBottom from '../assets/paper-page-bottom.png';
 
 type Screen = 'landing' | 'goals' | 'prompts' | 'conversation' | 'notes';
 type Message = { id: number; role: 'user' | 'assistant'; text: string; source?: string };
+type PaperSource = { url: string; name: string; local: boolean };
+type PanelPosition = { top: number; left: number };
 
 const TITLE = 'MDA: A Formal Approach to Game Design and Game Research';
 const prompts = [
@@ -35,10 +38,11 @@ const responses = [
 export function PaperLensWorkspace() {
   const [screen, setScreen] = useState<Screen>('landing');
   const [paperLoaded, setPaperLoaded] = useState(false);
+  const [paperSource, setPaperSource] = useState<PaperSource | null>(null);
   const [viewerWidth, setViewerWidth] = useState(430);
   const [zoom, setZoom] = useState(100);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [languageOpen, setLanguageOpen] = useState(false);
+  const [languagePanelPosition, setLanguagePanelPosition] = useState<PanelPosition | null>(null);
   const [language, setLanguage] = useState('English');
   const [goal, setGoal] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -46,12 +50,38 @@ export function PaperLensWorkspace() {
   const [responding, setResponding] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
   const messageRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const responseTimerRef = useRef<number | null>(null);
 
-  const loadPaper = () => { setPaperLoaded(true); setScreen('goals'); };
+  const showPaper = (source: PaperSource | null) => {
+    setPaperSource(source);
+    setPaperLoaded(true);
+    setScreen('goals');
+  };
+  const loadLocalPaper = (file: File) => showPaper({
+    url: URL.createObjectURL(file),
+    name: file.name,
+    local: true,
+  });
+  const loadPaperUrl = (url: string) => showPaper(url ? {
+    url,
+    name: 'Paper from link',
+    local: false,
+  } : null);
   const newConversation = () => {
+    if (responseTimerRef.current !== null) window.clearTimeout(responseTimerRef.current);
     setGoal(''); setMessages([]); setDraft('');
-    setHistoryOpen(false); setLanguageOpen(false);
-    setScreen(paperLoaded ? 'goals' : 'landing');
+    setResponding(false); setHistoryOpen(false); setLanguagePanelPosition(null);
+    setPaperLoaded(false); setPaperSource(null); setZoom(100); setViewerWidth(430);
+    setLanguage('English'); messageRefs.current = [];
+    setScreen('landing');
+  };
+  const openLanguage = (event: ReactMouseEvent<HTMLButtonElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const panelWidth = Math.min(375, window.innerWidth - 24);
+    setLanguagePanelPosition({
+      top: rect.bottom + 10,
+      left: Math.max(12, Math.min(rect.right - panelWidth, window.innerWidth - panelWidth - 12)),
+    });
   };
   const chooseGoal = (nextGoal: string) => { setGoal(nextGoal); setMessages([]); setScreen('prompts'); };
   const addExchange = (question: string, answer?: string) => {
@@ -60,12 +90,13 @@ export function PaperLensWorkspace() {
     const seed = Date.now();
     setMessages((current) => [...current, { id: seed, role: 'user', text: question }]);
     setScreen('conversation'); setDraft(''); setResponding(true);
-    window.setTimeout(() => {
+    responseTimerRef.current = window.setTimeout(() => {
       setMessages((current) => [...current, {
         id: seed + 1, role: 'assistant', text: answer ?? responses[answerIndex],
         source: answerIndex === 1 ? 'highlighted passage + MDA overview' : 'MDA overview and opening sections',
       }]);
       setResponding(false);
+      responseTimerRef.current = null;
     }, 280);
   };
   const submit = (event: FormEvent) => {
@@ -91,19 +122,28 @@ export function PaperLensWorkspace() {
       contentRef.current?.scrollTo({ top: contentRef.current.scrollHeight, behavior: 'smooth' });
     }
   }, [messages, responding]);
+  useEffect(() => () => {
+    if (paperSource?.local) URL.revokeObjectURL(paperSource.url);
+  }, [paperSource]);
+  useEffect(() => () => {
+    if (responseTimerRef.current !== null) window.clearTimeout(responseTimerRef.current);
+  }, []);
 
   const questionCount = messages.filter((item) => item.role === 'user').length;
   return (
     <main className="paperlens-workspace" style={{ '--viewer-width': `${viewerWidth}px` } as CSSProperties}>
       <section className="paper-pane" aria-label="Paper viewer">
-        {paperLoaded ? <PaperViewer zoom={zoom} setZoom={setZoom} /> : <LandingUpload onLoad={loadPaper} />}
+        {paperLoaded
+          ? <PaperViewer zoom={zoom} setZoom={setZoom} source={paperSource} />
+          : <LandingUpload onFile={loadLocalPaper} onUrl={loadPaperUrl} />}
       </section>
       <button className="splitter" onPointerDown={startResize} aria-label="Resize paper and conversation panels">
         <span aria-hidden="true">›</span>
       </button>
       <section className="reading-pane">
-        <Header paperLoaded={paperLoaded} onHistory={() => setHistoryOpen(true)} onNew={newConversation}
-          onLanguage={() => setLanguageOpen(true)} onNotes={() => setScreen('notes')} />
+        <Header paperTitle={paperLoaded ? (paperSource?.name.replace(/\.pdf$/i, '') || TITLE) : null}
+          onHistory={() => setHistoryOpen(true)} onNew={newConversation}
+          onLanguage={openLanguage} onNotes={() => setScreen('notes')} />
         <div className="reading-body" ref={contentRef}>
           {goal && screen !== 'notes' && <div className="goal-chip">Goal: {goal}</div>}
           {screen === 'landing' && <Welcome />}
@@ -118,18 +158,21 @@ export function PaperLensWorkspace() {
         )}
       </section>
       {historyOpen && <HistoryDrawer onClose={() => setHistoryOpen(false)} onSelect={() => setHistoryOpen(false)} />}
-      {languageOpen && <LanguagePanel selected={language} onSelect={(next) => { setLanguage(next); setLanguageOpen(false); }} onClose={() => setLanguageOpen(false)} />}
+      {languagePanelPosition && <LanguagePanel selected={language} position={languagePanelPosition}
+        onSelect={(next) => { setLanguage(next); setLanguagePanelPosition(null); }}
+        onClose={() => setLanguagePanelPosition(null)} />}
     </main>
   );
 }
 
-function Header({ paperLoaded, onHistory, onNew, onLanguage, onNotes }: {
-  paperLoaded: boolean; onHistory: () => void; onNew: () => void; onLanguage: () => void; onNotes: () => void;
+function Header({ paperTitle, onHistory, onNew, onLanguage, onNotes }: {
+  paperTitle: string | null; onHistory: () => void; onNew: () => void;
+  onLanguage: (event: ReactMouseEvent<HTMLButtonElement>) => void; onNotes: () => void;
 }) {
   return <header className="workspace-header">
     <div className="title-line">
       <button className="brand-title" onClick={onHistory} title="Open chat history">PaperLens</button>
-      <span className="title-slash">/</span><span className="paper-title">{paperLoaded ? TITLE : 'Paper title'}</span>
+      <span className="title-slash">/</span><span className="paper-title">{paperTitle || 'Paper title'}</span>
     </div>
     <div className="header-actions">
       <IconButton label="Start a new conversation" onClick={onNew}><MessageSquarePlus /></IconButton>
@@ -139,23 +182,50 @@ function Header({ paperLoaded, onHistory, onNew, onLanguage, onNotes }: {
   </header>;
 }
 
-function IconButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
+function IconButton({ label, onClick, children }: {
+  label: string; onClick: (event: ReactMouseEvent<HTMLButtonElement>) => void; children: ReactNode;
+}) {
   return <button className="icon-button" onClick={onClick} aria-label={label} data-tooltip={label}>{children}</button>;
 }
 
-function LandingUpload({ onLoad }: { onLoad: () => void }) {
-  return <div className="upload-page"><div className="upload-card" role="button" tabIndex={0} onClick={onLoad}
-    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') onLoad(); }}
-    onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); onLoad(); }}>
+function LandingUpload({ onFile, onUrl }: { onFile: (file: File) => void; onUrl: (url: string) => void }) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const [paperUrl, setPaperUrl] = useState('');
+  const [error, setError] = useState('');
+  const acceptFile = (file?: File) => {
+    if (!file) return;
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      setError('Please choose a PDF file.');
+      return;
+    }
+    setError('');
+    onFile(file);
+  };
+  const browse = () => inputRef.current?.click();
+  return <div className="upload-page"><div className="upload-card" role="button" tabIndex={0} onClick={browse}
+    onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); browse(); } }}
+    onDragOver={(event) => { event.preventDefault(); event.dataTransfer.dropEffect = 'copy'; }}
+    onDrop={(event) => { event.preventDefault(); acceptFile(event.dataTransfer.files[0]); }}>
+    <input ref={inputRef} className="file-input" type="file" accept="application/pdf,.pdf" onClick={(event) => event.stopPropagation()}
+      aria-label="Choose a PDF file" onChange={(event) => { acceptFile(event.target.files?.[0]); event.target.value = ''; }} />
     <FilePlus2 aria-hidden="true" /><span>Drop a PDF here<br />or click to browse</span>
-    <span className="url-field" onClick={(event) => event.stopPropagation()}>
-      <input placeholder="Paste a DOI or paper URL" aria-label="Paper URL" />
-      <span role="button" tabIndex={0} onClick={onLoad} onKeyDown={(event) => event.key === 'Enter' && onLoad()}>Open</span>
-    </span><small>PDF · DOI · arXiv URL</small>
+    <span className="url-field" onClick={(event) => event.stopPropagation()} onKeyDown={(event) => event.stopPropagation()}>
+      <input value={paperUrl} onChange={(event) => setPaperUrl(event.target.value)}
+        onKeyDown={(event) => { if (event.key === 'Enter') onUrl(paperUrl.trim()); }}
+        placeholder="Paste a DOI or paper URL" aria-label="Paper URL" />
+      <button type="button" onClick={() => onUrl(paperUrl.trim())}>Open</button>
+    </span>
+    {error && <span className="upload-error" role="alert">{error}</span>}
+    <small>PDF · DOI · arXiv URL</small>
   </div></div>;
 }
 
-function PaperViewer({ zoom, setZoom }: { zoom: number; setZoom: (value: number) => void }) {
+function PaperViewer({ zoom, setZoom, source }: {
+  zoom: number; setZoom: (value: number) => void; source: PaperSource | null;
+}) {
+  if (source) return <div className="paper-viewer local-pdf-viewer">
+    <iframe className="local-pdf-frame" src={`${source.url}#view=FitH`} title={`PDF preview: ${source.name}`} />
+  </div>;
   const nextZoom = zoom === 80 ? 100 : zoom === 100 ? 125 : 80;
   return <div className="paper-viewer">
     <button className="zoom-button" onClick={() => setZoom(nextZoom)} title="Change zoom">{zoom}% <span>⌄</span></button>
@@ -214,15 +284,18 @@ function HistoryDrawer({ onClose, onSelect }: { onClose: () => void; onSelect: (
   const items = [['CURRENT SESSION', 'MDA: framework, direction and player experience'], ['YESTERDAY', 'Dark patterns and player autonomy'], ['18 SEP', 'Embodied interaction · lecture notes']];
   return <aside className="history-drawer" aria-label="Chat history">
     <div className="drawer-heading"><h2>Chat history</h2><button onClick={onClose} aria-label="Close history"><ChevronLeft /></button></div>
-    <small>THIS DEVICE</small><div className="history-list">{items.map(([date, title], index) =>
-      <button key={title} className={index === 0 ? 'active' : ''} onClick={onSelect}><small>{date}</small><span>{title}</span></button>,
+    <small>THIS DEVICE</small><div className="history-list">{items.map(([date, title]) =>
+      <button key={title} onClick={onSelect}><small>{date}</small><span>{title}</span></button>,
     )}</div>
   </aside>;
 }
 
-function LanguagePanel({ selected, onSelect, onClose }: { selected: string; onSelect: (value: string) => void; onClose: () => void }) {
+function LanguagePanel({ selected, position, onSelect, onClose }: {
+  selected: string; position: PanelPosition; onSelect: (value: string) => void; onClose: () => void;
+}) {
   const languages = ['English', '中文（简体）', '中文（繁體）', '日本語', 'More languages…'];
-  return <div className="modal-scrim" onMouseDown={onClose}><section className="language-panel" aria-label="Language settings" onMouseDown={(event) => event.stopPropagation()}>
+  return <div className="modal-scrim" onMouseDown={onClose}><section className="language-panel" aria-label="Language settings"
+    style={{ top: position.top, left: position.left }} onMouseDown={(event) => event.stopPropagation()}>
     <div className="language-search"><Search /><span>Choose your preferred response language</span></div>
     {languages.map((item) => <button key={item} className={selected === item ? 'active' : ''} onClick={() => onSelect(item)}><span>{item}</span>{item === 'English' && <small>default</small>}</button>)}
     <p>Responses only · paper text stays unchanged</p>
