@@ -23,6 +23,7 @@ type SourceLocation = {
   page: number;
   kind: 'passage' | 'figure';
   label: string;
+  searchTerm: string;
   topPercent: number;
   heightPercent: number;
 };
@@ -70,7 +71,7 @@ const responseDetails: Array<{
       { text: 'How can I apply MDA to analyse a game?', responseIndex: 2 },
       { text: 'What are the limitations of the framework?', responseIndex: 3 },
     ],
-    source: { page: 1, kind: 'passage', label: 'Towards a Comprehensive Framework', topPercent: 18, heightPercent: 29 },
+    source: { page: 1, kind: 'passage', label: 'Towards a Comprehensive Framework', searchTerm: 'Towards a Comprehensive Framework', topPercent: 18, heightPercent: 29 },
   },
   {
     layers: [
@@ -82,7 +83,7 @@ const responseDetails: Array<{
       { text: 'How can I apply MDA to analyse a game?', responseIndex: 2 },
       { text: 'What are the limitations of the framework?', responseIndex: 3 },
     ],
-    source: { page: 1, kind: 'figure', label: 'MDA framework diagram', topPercent: 63, heightPercent: 25 },
+    source: { page: 1, kind: 'figure', label: 'MDA framework diagram', searchTerm: 'Mechanics Dynamics Aesthetics', topPercent: 63, heightPercent: 25 },
   },
   {
     layers: [
@@ -94,7 +95,7 @@ const responseDetails: Array<{
       { text: 'What evidence should I collect from players?', responseIndex: 2 },
       { text: 'What are the limitations of the framework?', responseIndex: 3 },
     ],
-    source: { page: 2, kind: 'figure', label: 'Designer and player perspectives', topPercent: 5, heightPercent: 35 },
+    source: { page: 2, kind: 'figure', label: 'Designer and player perspectives', searchTerm: 'designer player', topPercent: 5, heightPercent: 35 },
   },
   {
     layers: [
@@ -105,7 +106,7 @@ const responseDetails: Array<{
     suggestions: [
       { text: 'How could I adapt MDA for qualitative research?', responseIndex: 2 },
     ],
-    source: { page: 2, kind: 'passage', label: 'Discussion of models and iterative design', topPercent: 48, heightPercent: 34 },
+    source: { page: 2, kind: 'passage', label: 'Discussion of models and iterative design', searchTerm: 'iterative design', topPercent: 48, heightPercent: 34 },
   },
 ];
 
@@ -205,7 +206,7 @@ export function PaperLensWorkspace() {
           { label: 'Limitations', text: 'The framework is conceptual rather than an empirically validated method. Its linear presentation may underrepresent iteration, social play, culture, and narrative context.' },
           { label: 'Recommended adaptation', text: 'Use MDA to organise initial observations, then add qualitative player data and contextual analysis before drawing conclusions.' },
         ],
-        source: { page: 2, kind: 'passage', label: 'Models, goals, and iterative refinement', topPercent: 43, heightPercent: 38 },
+        source: { page: 2, kind: 'passage', label: 'Models, goals, and iterative refinement', searchTerm: 'models goals refinement', topPercent: 43, heightPercent: 38 },
       }]);
       setReviewComplete(true);
       setResponding(false);
@@ -259,13 +260,19 @@ export function PaperLensWorkspace() {
           {screen === 'goals' && <GoalPicker onChoose={chooseGoal} />}
           {screen === 'prompts' && <PromptPicker goal={goal} onChoose={(question, index) => addExchange(question, index)} />}
           {screen === 'conversation' && <Conversation messages={messages} refs={messageRefs} responding={responding}
-            reviewComplete={reviewComplete} judgment={researchJudgment} onReview={runCriticalReview}
+            reviewComplete={reviewComplete} judgment={researchJudgment}
             onJudgment={setResearchJudgment} onCreateNote={() => setScreen('notes')}
             onFollowUp={(question, responseIndex) => addExchange(question, responseIndex)} onSource={setPaperLocation} />}
           {screen === 'notes' && <SessionNotes goal={goal} judgment={researchJudgment}
             onBack={() => setScreen(messages.length ? 'conversation' : paperLoaded ? 'goals' : 'landing')} />}
         </div>
         {screen !== 'notes' && <Composer draft={draft} setDraft={setDraft} onSubmit={submit} disabled={!paperLoaded || responding} />}
+        {screen === 'conversation' && messages.some((message) => message.role === 'assistant') && !reviewComplete && (
+          <button className="critical-review-launcher" onClick={runCriticalReview} disabled={responding}>
+            <Search aria-hidden="true" />
+            <span><strong>Critical review</strong><small>Evaluate applicability & limitations</small></span>
+          </button>
+        )}
         {screen === 'conversation' && questionCount > 0 && (
           <QuestionNavigator count={questionCount} onSelect={(index) => messageRefs.current[index]?.scrollIntoView({ behavior: 'smooth', block: 'start' })} />
         )}
@@ -342,8 +349,13 @@ function PaperViewer({ zoom, setZoom, source, location }: {
   }, [location, source]);
   if (source) return <div className="paper-viewer local-pdf-viewer">
     {location && <SourceLocationBanner location={location} />}
-    <iframe key={`${source.url}-${location?.page || 1}`} className="local-pdf-frame"
-      src={`${source.url}#page=${location?.page || 1}&view=FitH`} title={`PDF preview: ${source.name}`} />
+    <iframe key={`${source.url}-${location?.page || 1}-${location?.label || 'paper'}`} className="local-pdf-frame"
+      src={`${source.url}#page=${location?.page || 1}&view=Fit${location ? `&search=${encodeURIComponent(location.searchTerm)}` : ''}`}
+      title={`PDF preview: ${source.name}`} />
+    {location && <span className={`local-source-highlight ${location.kind}`}
+      style={{ top: `${10 + location.topPercent * .76}%`, height: `${Math.max(8, location.heightPercent * .76)}%` }}>
+      <span>{location.kind === 'figure' ? 'Figure evidence' : 'Source passage'} · highlighted without changing the PDF</span>
+    </span>}
   </div>;
   const nextZoom = zoom === 80 ? 100 : zoom === 100 ? 125 : 80;
   return <div className="paper-viewer">
@@ -395,13 +407,12 @@ function PromptPicker({ goal, onChoose }: { goal: string; onChoose: (question: s
   </div></div>;
 }
 
-function Conversation({ messages, refs, responding, reviewComplete, judgment, onReview, onJudgment, onCreateNote, onFollowUp, onSource }: {
+function Conversation({ messages, refs, responding, reviewComplete, judgment, onJudgment, onCreateNote, onFollowUp, onSource }: {
   messages: Message[];
   refs: RefObject<Array<HTMLDivElement | null>>;
   responding: boolean;
   reviewComplete: boolean;
   judgment: ResearchJudgment | null;
-  onReview: () => void;
   onJudgment: (judgment: ResearchJudgment) => void;
   onCreateNote: () => void;
   onFollowUp: (question: string, responseIndex: number) => void;
@@ -433,25 +444,18 @@ function Conversation({ messages, refs, responding, reviewComplete, judgment, on
     </div>;
   })}{responding && <div className="message assistant thinking"><span /><span /><span /></div>}
     {!responding && messages.some((message) => message.role === 'assistant') && <ResearchUseFlow
-      reviewComplete={reviewComplete} judgment={judgment} onReview={onReview}
-      onJudgment={onJudgment} onCreateNote={onCreateNote} />}
+      reviewComplete={reviewComplete} judgment={judgment} onJudgment={onJudgment} onCreateNote={onCreateNote} />}
   </div>;
 }
 
-function ResearchUseFlow({ reviewComplete, judgment, onReview, onJudgment, onCreateNote }: {
+function ResearchUseFlow({ reviewComplete, judgment, onJudgment, onCreateNote }: {
   reviewComplete: boolean;
   judgment: ResearchJudgment | null;
-  onReview: () => void;
   onJudgment: (judgment: ResearchJudgment) => void;
   onCreateNote: () => void;
 }) {
   const options: ResearchJudgment[] = ['Use as proposed', 'Use with adaptations', 'Do not use', 'Need more evidence'];
-  if (!reviewComplete) return <section className="research-step">
-    <small>OPTIONAL CRITICAL REVIEW</small>
-    <h2>Could this idea support your research?</h2>
-    <p>Examine applicability, supporting evidence, assumptions, and transfer risks before making a decision.</p>
-    <button className="review-button" onClick={onReview}><Search aria-hidden="true" /> Evaluate for my research</button>
-  </section>;
+  if (!reviewComplete) return null;
 
   return <section className="research-step judgment-step">
     <small>LEARNER JUDGMENT</small>
