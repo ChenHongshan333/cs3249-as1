@@ -1,0 +1,37 @@
+{
+  "name": "paperlens-high-fi",
+  "version": "0.3.1",
+  "private": true,
+  "type": "module",
+  "description": "PaperLens high-fidelity interactive prototype for CS3249.",
+  "engines": {
+    "node": "^18.13.0 || ^20.0.0 || >=22.0.0"
+  },
+  "scripts": {
+    "postinstall": "node scripts/patch-locator.mjs",
+    "setup": "node scripts/setup.mjs",
+    "start": "node scripts/start.mjs",
+    "doctor": "node scripts/doctor.mjs",
+    "build": "tsc --noEmit && vite build",
+    "test": "tsx --test tests/mock-service.test.ts scripts/tests/local-scripts.test.mjs scripts/tests/locator-paths.test.mjs"
+  },
+  "dependencies": {
+    "@assistant-ui/react": "0.14.26",
+    "lucide-react": "1.45.0",
+    "radix-ui": "1.6.7",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@babel/core": "7.29.7",
+    "@locator/babel-jsx": "0.5.1",
+    "@locator/runtime": "0.5.1",
+    "@types/node": "22.20.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "4.7.0",
+    "tsx": "4.23.13",
+    "typescript": "5.9.3",
+    "vite": "6.4.3"
+  }
+}

@@ -1,0 +1,16 @@
+:root {
+  color-scheme: light;
+  --paper: #f7f4ed;
+  --sage: #c7d3c0;
+  --sage-dark: #8fa28a;
+  --sage-ink: #5f7d5a;
+  --gold: #c8a96b;
+  --ink: #1f211c;
+  --muted: #8f9389;
+  --divider: #d6ded1;
+  --viewer-width: 430px;
+  font-family: Cambo, Georgia, 'Times New Roman', serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+}
